@@ -4,7 +4,7 @@ from app.routes.visitor_router import visitor_bp
 from app.routes.ngrok_router import ngrok_bp
 from app.routes.notifications_router import notifications_bp
 from app.services.firebase import initialize_firebase
-
+from app.routes.ngrok_router import start_ngrok
 import os
 from dotenv import load_dotenv
 
@@ -26,11 +26,12 @@ def create_app():
 
     # Firebase 초기화
     initialize_firebase()
+    start_ngrok()
 
     # Blueprint 등록
     app.register_blueprint(webcam_bp)
     app.register_blueprint(visitor_bp)
-    app.register_blueprint(ngrok_bp)
+    # app.register_blueprint(ngrok_bp)
     app.register_blueprint(notifications_bp)
 
     return app
