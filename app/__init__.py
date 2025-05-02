@@ -12,7 +12,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # 환경 변수 가져오기
-CAMERA_INDEX = int(os.getenv("CAMERA_INDEX", 0))  # 기본값 0
 FLASK_ENV = os.getenv("FLASK_ENV", "production")
 
 # PYTHONPATH 설정
