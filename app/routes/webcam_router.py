@@ -1,9 +1,13 @@
 from flask import Blueprint, jsonify, Response, stream_with_context
 import cv2
 import base64
-from app.services.webcam_service import capture_images, get_camera_stream, start_camera_stream, stop_camera_stream, video_feed
+from app.services.webcam_service import capture_images, get_camera_stream, start_camera_stream, stop_camera_stream, video_feed, is_streaming
 
 webcam_bp = Blueprint("webcam", __name__)
+
+# 모듈 최상단에 한 번만 선언
+# ffmpeg_process = None
+# streaming_flag = False
 
 @webcam_bp.route("/capture_images", methods=["GET"])
 def capture_picture():
@@ -45,3 +49,7 @@ def video_feed():
 
     return Response(stream_with_context(generate()),
                     mimetype='multipart/x-mixed-replace; boundary=frame')
+
+@webcam_bp.route('/')
+def video_feed2():
+    return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
