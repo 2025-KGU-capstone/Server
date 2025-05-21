@@ -7,9 +7,9 @@ import pathlib
 pathlib.PosixPath = pathlib.WindowsPath
 
 model = torch.hub.load(
-    r"D:\Desktop\kgu\4_year\Server\yolov5",  # 절대경로
+    r"C:\Users\seong\Desktop\캡스톤\Server\yolov5",  # 절대경로
     "custom",
-    path="D:/Desktop/kgu/4_year/Server/app/pt_files/best_windows.pt",  # 모델 절대경로
+    path="C:\Users\seong\Desktop\캡스톤\Server\app\pt_files\best_windows.pt",  # 모델 절대경로
     source="local",
 )
 
