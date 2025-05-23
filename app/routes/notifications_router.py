@@ -38,7 +38,7 @@ def _siren_loop():
         buzzer_pwm_started = True
 
     while siren_active:
-        for freq in [440, 880]:  # 주파수 범위 조정
+        for freq in [44, 88]:  # 주파수 범위 조정
             if not siren_active:
                 break
             buzzer_pwm.ChangeFrequency(freq)
@@ -80,16 +80,20 @@ def send_notification():
     return {"status": "error", "message": "Missing required fields"}, 400
 
 
-@notifications_bp.route("/siren", methods=["POST"])
+@notifications_bp.route("/siren", methods=["GET"])
 @doc(description='사이렌 제어', tags=['notifications'])
 def control_siren():
     action = request.args.get("action", "")
-    if action == "start":
-        start_siren()
-        return "Siren started", 200
-    elif action == "stop":
+
+    start_siren()
+
+    def stop_after_delay():
+        time.sleep(5)
         stop_siren()
-        return "Siren stopped", 200
-    else:
-        return "Invalid action", 400
+
+    threading.Thread(target=stop_after_delay, daemon=True).start()
+
+    return "Siren will stop in 5 seconds", 200
+
+	
 	
