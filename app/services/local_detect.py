@@ -6,13 +6,7 @@ import pathlib
 # Windows 호환 경로 처리
 pathlib.PosixPath = pathlib.WindowsPath
 
-model = torch.hub.load(
-    r"C:\Users\seong\Desktop\캡스톤\Server\yolov5",  # 절대경로
-    "custom",
-    path="C:\Users\seong\Desktop\캡스톤\Server\app\pt_files\best_windows.pt",  # 모델 절대경로
-    source="local",
-)
-
+global model
 
 # 웹캠 열기
 cap = cv2.VideoCapture(0)

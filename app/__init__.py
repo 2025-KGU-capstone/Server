@@ -7,6 +7,12 @@ from app.services.firebase import initialize_firebase
 from app.routes.ngrok_router import start_ngrok
 import os
 from dotenv import load_dotenv
+from flasgger import Swagger
+from flask_apispec.extension import FlaskApiSpec
+from apispec import APISpec
+from apispec.ext.marshmallow import MarshmallowPlugin
+from app.routes import *
+
 
 # .env 파일 로드
 load_dotenv()
@@ -21,16 +27,45 @@ if PYTHONPATH:
     sys.path.append(PYTHONPATH)
 
 def create_app():
-    app = Flask(__name__)
+	app = Flask(__name__)
+	load_dotenv()
 
-    # Firebase 초기화
-    initialize_firebase()
-    start_ngrok()
+	# Firebase 및 ngrok 시작
+	initialize_firebase()
 
-    # Blueprint 등록
-    app.register_blueprint(webcam_bp)
-    app.register_blueprint(visitor_bp)
-    # app.register_blueprint(ngrok_bp)
-    app.register_blueprint(notifications_bp)
+	# Blueprint 등록
+	app.register_blueprint(webcam_bp)
+	app.register_blueprint(visitor_bp)
+	# app.register_blueprint(ngrok_bp)
+	app.register_blueprint(notifications_bp)
 
-    return app
+	# API 문서 설정
+	app.config.update({
+		'APISPEC_SPEC': APISpec(
+			title="Webcam API",
+			version="v1",
+			openapi_version="2.0",
+			plugins=[MarshmallowPlugin()],
+		),
+		'APISPEC_SWAGGER_UI_URL': '/apidocs',
+	})
+
+	docs = FlaskApiSpec(app)
+
+	# View 함수 등록
+	docs.register(capture_picture, blueprint='webcam')
+	docs.register(start, blueprint='webcam')
+	docs.register(stop, blueprint='webcam')
+	docs.register(video_feed_route, blueprint='webcam')
+
+	docs.register(delete, blueprint='visitor')
+	docs.register(get_image, blueprint='visitor')
+	docs.register(get_images, blueprint='visitor')
+	docs.register(upload, blueprint='visitor')
+
+	# docs.register(ngrok_status, blueprint='ngrok')
+
+	docs.register(send_notification, blueprint='notifications')
+	# docs.register(control_siren, blueprint='notifications')
+
+	return app

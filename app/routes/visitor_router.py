@@ -1,5 +1,6 @@
 from flask import Blueprint, request, jsonify, send_file
 import os
+from flask_apispec import doc
 
 visitor_bp = Blueprint("visitor", __name__)
 
@@ -12,6 +13,7 @@ sent_files = []
 IMAGE_DIR = "saved_images"
 
 @visitor_bp.route("/upload", methods=["POST"])
+@doc(description='이미지 업로드', tags=['visitor'])
 def upload():
     name = request.form.get("name")
     file = request.files.get("file")
@@ -24,6 +26,7 @@ def upload():
     return jsonify({"status": "error", "message": "Invalid data"}), 400
 
 @visitor_bp.route("/get_images", methods=["GET"])
+@doc(description='저장된 이미지 목록 가져오기', tags=['visitor'])
 def get_images():
     global sent_files
     images_to_send = []
@@ -37,6 +40,7 @@ def get_images():
     return jsonify({"images": images_to_send})
 
 @visitor_bp.route("/get_image/<filename>", methods=["GET"])
+@doc(description='이미지 가져오기', tags=['visitor'])
 def get_image(filename):
     file_path = os.path.join(IMAGE_DIR, filename)
     if os.path.exists(file_path):
@@ -45,6 +49,7 @@ def get_image(filename):
         return jsonify({"error": "File not found"}), 404
 
 @visitor_bp.route('/delete', methods=['POST'])
+@doc(description='이미지 삭제', tags=['visitor'])
 def delete():
     name = request.json.get('name')  # 삭제할 이름
 
