@@ -12,7 +12,8 @@ from flask_apispec.extension import FlaskApiSpec
 from apispec import APISpec
 from apispec.ext.marshmallow import MarshmallowPlugin
 from app.routes import *
-
+from app.gpio.gpio_init import initialized_gpio
+from app.services.webcam_service import setup_pir_event
 
 # .env 파일 로드
 load_dotenv()
@@ -68,4 +69,14 @@ def create_app():
 	docs.register(send_notification, blueprint='notifications')
 	# docs.register(control_siren, blueprint='notifications')
 
+	initialized_gpio()
+	# setup_pir_event()
 	return app
+
+
+import atexit
+import RPi.GPIO as GPIO
+
+@atexit.register
+def cleanup_gpio():
+    GPIO.cleanup()

@@ -8,8 +8,8 @@ import time
 import numpy as np
 import cv2
 import torch
-from app.services.push_notification import send_push_notification
 from dotenv import load_dotenv
+from app.services.push_notification import control_siren
 
 load_dotenv()
 
@@ -17,7 +17,6 @@ CONFIDENCE_THRESHOLD = 0.8
 DEVICE_TOKEN = os.getenv("DEVICE_TOKEN")
 
 # 전역 변수 선언
-ffmpeg_process = None
 streaming_flag = False  # 스트리밍 상태 확인용
 
 STREAM_CAMERA_INDEX = 0
@@ -25,7 +24,12 @@ CAP_CAMERA_INDEX = 1
 SAVE_DIR = "captured_images"
 os.makedirs(SAVE_DIR, exist_ok=True)
 
+# 전역 선언
+camera1_proc = None
+camera2_proc = None
 
+stream_lock1 = threading.Lock()
+stream_lock2 = threading.Lock()
 
 # YOLO 모델 로드 (최상단에 위치)
 model = torch.hub.load(
@@ -58,30 +62,41 @@ def capture_images():
     })
 
 def stop_camera_stream():
-    global ffmpeg_process, ffmpeg_process2
-    global streaming_flag, streaming_flag2
+	global streaming_flag, camera1_proc
 
-    # 첫 번째 카메라 종료
-    if ffmpeg_process is not None:
-        ffmpeg_process.terminate()
-        try:
-            ffmpeg_process.wait(timeout=1)
-        except subprocess.TimeoutExpired:
-            ffmpeg_process.kill()
-        ffmpeg_process = None
+	streaming_flag = False
+
+	if camera1_proc is not None:
+		camera1_proc.terminate()
+		try:
+			camera1_proc.wait(timeout=1)
+		except subprocess.TimeoutExpired:
+			camera1_proc.kill()
+		camera1_proc = None
+
+	print("Camera1 stream stopped.")
+
+def stop_all_camera_stream():
+    global streaming_flag, streaming_flag2, camera1_proc, camera2_proc
 
     streaming_flag = False
-
-    # 두 번째 카메라 종료
-    if ffmpeg_process2 is not None:
-        ffmpeg_process2.terminate()
-        try:
-            ffmpeg_process2.wait(timeout=1)
-        except subprocess.TimeoutExpired:
-            ffmpeg_process2.kill()
-        ffmpeg_process2 = None
-
     streaming_flag2 = False
+
+    if camera1_proc is not None:
+        camera1_proc.terminate()
+        try:
+            camera1_proc.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            camera1_proc.kill()
+        camera1_proc = None
+
+    if camera2_proc is not None:
+        camera2_proc.terminate()
+        try:
+            camera2_proc.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            camera2_proc.kill()
+        camera2_proc = None
 
     print("All camera streams stopped.")
 
@@ -99,12 +114,12 @@ def get_camera_stream():
     )
 
 def camera_thread_func():
-    global latest_frame, raw_frame_buffer
-    proc = get_camera_stream()
+    global latest_frame, raw_frame_buffer, camera1_proc
+    camera1_proc = get_camera_stream()
     buffer = b""
 
     while streaming_flag:
-        chunk = proc.stdout.read(1024)
+        chunk = camera1_proc.stdout.read(1024)
         if not chunk:
             break
         buffer += chunk
@@ -140,11 +155,12 @@ def model_thread_func():
 			for *box, conf, cls in results.xyxy[0]:  # [x1, y1, x2, y2, conf, class_id]
 				if conf < 0.6 and (current_time - last_notified_time) >= 10:
 					label = results.names[int(cls)]
-					send_push_notification(
-						DEVICE_TOKEN, f"{label} 감지됨", f"신뢰도 {conf:.2f}"
-					)
-					# capture_from_stream1()
-					# capture_from_stream2()
+					# send_push_notification(
+					# 	DEVICE_TOKEN, f"{label} 감지됨", f"신뢰도 {conf:.2f}"
+					# )
+					capture_from_stream1()
+					capture_from_stream2()
+					control_siren(True)  # 사이렌 작동
 					last_notified_time = current_time
 					break  # 하나만 감지되면 알림 보내고 종료
 
@@ -166,20 +182,31 @@ def start_camera_stream():
 
 
 def video_feed():
+    global streaming_flag
+
+    with stream_lock1:
+        if not streaming_flag:
+            start_camera_stream()
+            streaming_flag = True
     def generate():
-        while streaming_flag:
-            with frame_lock:
-                frame = latest_frame.copy() if latest_frame is not None else None
-            if frame is not None:
-                _, jpeg = cv2.imencode(
-                    ".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 60]
-                )
-                yield (
-                    b"--frame\r\n"
-                    b"Content-Type: image/jpeg\r\n\r\n" + jpeg.tobytes() + b"\r\n"
-                )
-            time.sleep(0.01)
-        print("Streaming stopped.")
+        global streaming_flag
+        try:
+            while streaming_flag:
+                with frame_lock:
+                    frame = latest_frame.copy() if latest_frame is not None else None
+                if frame is not None:
+                    _, jpeg = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
+                    yield (
+                        b"--frame\r\n"
+                        b"Content-Type: image/jpeg\r\n\r\n" + jpeg.tobytes() + b"\r\n"
+                    )
+                time.sleep(0.01)
+        finally:
+            with stream_lock1:
+                streaming_flag = False
+                stop_camera_stream()
+                print("Streaming stopped.")
+
 
     return Response(
         stream_with_context(generate()),
@@ -205,12 +232,12 @@ def get_camera_stream2():
     )
 
 def camera_thread_func2():
-    global latest_frame2, raw_frame_buffer2
-    proc = get_camera_stream2()
+    global latest_frame2, raw_frame_buffer2, camera2_proc
+    camera2_proc = get_camera_stream2()
     buffer = b""
 
     while streaming_flag2:
-        chunk = proc.stdout.read(1024)
+        chunk = camera2_proc.stdout.read(1024)
         if not chunk:
             break
         buffer += chunk
@@ -256,19 +283,48 @@ def start_camera_stream2():
     threading.Thread(target=camera_thread_func2, daemon=True).start()
     # threading.Thread(target=model_thread_func2, daemon=True).start()
 
-def video_feed2():
-    def generate():
-        while streaming_flag2:
-            with frame_lock2:
-                frame = latest_frame2.copy() if latest_frame2 is not None else None
-            if frame is not None:
-                _, jpeg = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
-                yield (b"--frame\r\n"
-                       b"Content-Type: image/jpeg\r\n\r\n" + jpeg.tobytes() + b"\r\n")
-            time.sleep(0.01)
-        print("Streaming 2 stopped.")
-    return Response(stream_with_context(generate()), mimetype='multipart/x-mixed-replace; boundary=frame')
+def stop_camera_stream2():
+	global camera2_proc, streaming_flag2
+	streaming_flag2 = False
+	if camera2_proc is not None:
+		camera2_proc.terminate()
+		try:
+			camera2_proc.wait(timeout=1)
+		except subprocess.TimeoutExpired:
+			camera2_proc.kill()
+		camera2_proc = None
+	print("Camera 2 stream stopped.")
 
+
+def video_feed2():
+    global streaming_flag2
+
+    with stream_lock2:
+        if not streaming_flag2:
+            start_camera_stream2()
+            streaming_flag2 = True
+
+    def generate():
+        global streaming_flag2
+        try:
+            while streaming_flag2:
+                with frame_lock2:
+                    frame = latest_frame2.copy() if latest_frame2 is not None else None
+                if frame is not None:
+                    _, jpeg = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
+                    yield (b"--frame\r\n"
+                           b"Content-Type: image/jpeg\r\n\r\n" + jpeg.tobytes() + b"\r\n")
+                time.sleep(0.01)
+        finally:
+            with stream_lock2:
+                streaming_flag2 = False
+                stop_camera_stream2()
+                print("Streaming 2 stopped.")
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype='multipart/x-mixed-replace; boundary=frame'
+    )
 from flask import jsonify
 
 def capture_from_stream1():
@@ -297,7 +353,7 @@ def capture_from_stream1():
         })
     except Exception as e:
         print(f"[capture_from_stream1 ERROR] {e}")
-        return jsonify({"status": "error", "message": str(e)})
+        return {"status": "error", "message": str(e)}
 
 def capture_from_stream2():
     global latest_frame2
@@ -325,4 +381,38 @@ def capture_from_stream2():
         })
     except Exception as e:
         print(f"[capture_from_stream2 ERROR] {e}")
-        return jsonify({"status": "error", "message": str(e)})
+        return {"status": "error", "message": str(e)}
+
+
+def start_streams():
+	video_feed()
+	video_feed2()
+	return jsonify({
+		"status": "started",
+		"streams": {
+			"video_feed": streaming_flag,
+			"video_feed2": streaming_flag2
+		}
+	})
+
+event_detected = False
+
+def setup_pir_event():
+	import RPi.GPIO as GPIO
+	from app.gpio.gpio_init import PIR_PIN
+	global event_detected
+
+	if event_detected:
+		print("PIR 이벤트 제거")
+		GPIO.remove_event_detect(PIR_PIN)
+	else:
+		GPIO.add_event_detect(PIR_PIN, GPIO.RISING, callback=lambda pir: start_streams(), bouncetime=300)
+		print("PIR 이벤트 감지 등록 완료")
+
+	event_detected = not event_detected
+	return {
+		"status": "success",
+		"event_detected": event_detected
+	}
+		
+	# GPIO.add_event_detect(PIR_PIN, GPIO.RISING, callback=control_siren(pir=True), bouncetime=300)

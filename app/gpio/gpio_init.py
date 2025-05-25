@@ -5,54 +5,81 @@ import os
 import threading
 import time
 
-class GPIOController:
-    def __init__(self):
-        self.BUZZER_PIN = 18
-        self.LED_PIN = 4
-        self.buzzer_pwm_started = False
-        self.siren_active = False
-        self.siren_thread = None
-        self.buzzer_pwm = None
+PIR_PIN = 21
+BUZZER_PIN = 18
+LED_PIN = 4
 
-    def initialize(self):
-        if os.environ.get("WERKZEUG_RUN_MAIN") == "true":
-            GPIO.setwarnings(False)
-            GPIO.setmode(GPIO.BCM)
-            GPIO.setup(self.BUZZER_PIN, GPIO.OUT)
-            GPIO.setup(self.LED_PIN, GPIO.OUT)
-            GPIO.output(self.LED_PIN, GPIO.LOW)
-            GPIO.output(self.BUZZER_PIN, GPIO.LOW)
-            self.buzzer_pwm = GPIO.PWM(self.BUZZER_PIN, 440)
+buzzer_pwm = None
+buzzer_pwm_started = False
+siren_active = False
+siren_thread = None	
 
-    def _siren_loop(self):
-        if not self.buzzer_pwm_started and self.buzzer_pwm:
-            self.buzzer_pwm.start(50)
-            self.buzzer_pwm_started = True
+def initialized_gpio():
+    global PIR_PIN, BUZZER_PIN, LED_PIN, buzzer_pwm, buzzer_pwm_started, siren_active, siren_thread
 
-        while self.siren_active:
-            GPIO.output(self.LED_PIN, GPIO.HIGH)
-            time.sleep(0.5)
-            GPIO.output(self.LED_PIN, GPIO.LOW)
-            time.sleep(0.5)
+    GPIO.setwarnings(False)
+    GPIO.setmode(GPIO.BCM)
+    GPIO.setup(PIR_PIN, GPIO.IN)
+    GPIO.setup(BUZZER_PIN, GPIO.OUT)
+    GPIO.setup(LED_PIN, GPIO.OUT)
 
-        if self.buzzer_pwm:
-            self.buzzer_pwm.stop()
-            self.buzzer_pwm_started = False
+    buzzer_pwm = GPIO.PWM(BUZZER_PIN, 440)
+    buzzer_pwm_started = False
+    siren_active = False
+    siren_thread = None
 
-    def start_siren(self):
-        if not self.siren_active:
-            self.siren_active = True
-            self.siren_thread = threading.Thread(target=self._siren_loop)
-            self.siren_thread.start()
+    print("✅ GPIO 초기화 완료")
+# GPIO.setwarnings(False)
+# GPIO.setmode(GPIO.BCM)
+# GPIO.setup(PIR_PIN, GPIO.IN)
+# GPIO.setup(BUZZER_PIN, GPIO.OUT)
+# GPIO.setup(LED_PIN, GPIO.OUT)
 
-    def stop_siren(self):
-        self.siren_active = False
-        if self.siren_thread and self.siren_thread.is_alive():
-            self.siren_thread.join()
-        if self.buzzer_pwm and self.buzzer_pwm_started:
-            self.buzzer_pwm.stop()
-            self.buzzer_pwm_started = False
+# PIR 이벤트 감지 등록
+# GPIO.add_event_detect(PIR_PIN, GPIO.RISING, callback=control_siren, bouncetime=300)
 
-@atexit.register(GPIO.cleanup)
+# buzzer_pwm = GPIO.PWM(BUZZER_PIN, 440)
+# buzzer_pwm_started = False
+# siren_active = False
+# siren_thread = None
+
+def _siren_loop():
+    global siren_active, buzzer_pwm_started, buzzer_pwm, LED_PIN
+    if not buzzer_pwm_started:
+        buzzer_pwm.start(50)
+        buzzer_pwm_started = True
+
+    while siren_active:
+        # for freq in [440, 880]:
+        for freq in [100, 220]:
+            if not siren_active:
+                break
+            buzzer_pwm.ChangeFrequency(freq)
+            GPIO.output(LED_PIN, not GPIO.input(LED_PIN))
+            time.sleep(0.2)
+
+    buzzer_pwm.stop()
+    buzzer_pwm_started = False
+    GPIO.output(LED_PIN, GPIO.LOW)
+
+def start_siren():
+    global siren_active, siren_thread
+    if not siren_active:
+        siren_active = True
+        siren_thread = threading.Thread(target=_siren_loop)
+        siren_thread.start()
+        print("🚨 사이렌 ON")
+
+def stop_siren():
+    global siren_active, siren_thread
+    siren_active = False
+    if siren_thread:
+        siren_thread.join()
+        print("🛑 사이렌 OFF")
+
+@atexit.register
 def cleanup_gpio():
-	GPIO.cleanup()
+    print("🔌 프로그램 종료: GPIO 정리")
+    if buzzer_pwm_started:
+        buzzer_pwm.stop()
+    GPIO.cleanup()
