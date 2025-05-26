@@ -1,47 +1,70 @@
 from flask import Blueprint, jsonify, Response, stream_with_context
-import cv2
-import base64
-from app.services.webcam_service import capture_images, get_camera_stream, start_camera_stream, stop_camera_stream, video_feed
+from app.services.webcam_service import capture_images, get_camera_stream, start_camera_stream, stop_camera_stream, video_feed, streaming_flag,\
+	start_camera_stream2, video_feed2, streaming_flag2, capture_from_stream2, capture_from_stream1,\
+	start_streams, setup_pir_event, stop_all_camera_stream
+from flask_apispec import doc
+
 
 webcam_bp = Blueprint("webcam", __name__)
 
 @webcam_bp.route("/capture_images", methods=["GET"])
+@doc(description='사진 촬영', tags=['webcam'])
 def capture_picture():
 	return capture_images()
 
-@webcam_bp.route("/start", methods=["POST"])
+@webcam_bp.route("/start")
+@doc(description='카메라 시작', tags=['webcam'])
 def start():
-    start_camera_stream()
-    return {"status": "started"}
+	"""Start the camera stream."""
+	start_camera_stream()
+	return {"status": "started"}
 
-@webcam_bp.route("/stop", methods=["POST"])
+@webcam_bp.route("/stop")
+@doc(description='카메라 정지', tags=['webcam'])
 def stop():
-    stop_camera_stream()
-    return {"status": "stopped"}
+	"""Stop the camera stream."""
+	stop_all_camera_stream()
+	return {"status": "stopped"}
 
-@webcam_bp.route("/video_feed")
-def video_feed():
-    def generate():
-        buffer = b""
-        proc = get_camera_stream()
-        if proc is None:
-            return  # 스트림이 종료된 상태면 아무것도 안 보냄
+@webcam_bp.route("/video_feed1")
+@doc(description='카메라 0번 비디오 피드', tags=['webcam'])
+def video_feed_route():
+    return video_feed()
 
-        while True:
-            try:
-                chunk = proc.stdout.read(1024)
-                if not chunk:
-                    break
+@webcam_bp.route("/video_feed2")
+@doc(description='카메라 1번 비디오 피드', tags=['webcam'])
+def video_feed_route2():
+    return video_feed2()
 
-                buffer += chunk
-                while b"\xff\xd9" in buffer:
-                    frame, buffer = buffer.split(b"\xff\xd9", 1)
-                    frame += b"\xff\xd9"
-                    yield (b"--frame\r\n"
-                           b"Content-Type: image/jpeg\r\n\r\n" + frame + b"\r\n")
-            except Exception as e:
-                print(f"Streaming error: {e}")
-                break
+@webcam_bp.route("/start_all_streams")
+@doc(description='두 개의 카메라 스트림 동시에 시작', tags=['webcam'])
+def start_all_streams():
+	return start_streams()
 
-    return Response(stream_with_context(generate()),
-                    mimetype='multipart/x-mixed-replace; boundary=frame')
+@webcam_bp.route("/capture")
+@doc(description='스트리밍 중인 카메라1, 2에서 캡처', tags=['webcam'])
+def capture_from_stream_route():
+    res1 = capture_from_stream1()
+    res2 = capture_from_stream2()
+
+    data1 = res1.get_json()
+    data2 = res2.get_json()
+
+    return jsonify({
+        "status": "success",
+        "image1": data1.get("image1") if data1 else None,
+        "image2": data2.get("image2") if data2 else None,
+        "error1": data1.get("message") if data1 and data1.get("status") == "error" else None,
+        "error2": data2.get("message") if data2 and data2.get("status") == "error" else None,
+    })
+
+@webcam_bp.route("/pir")
+@doc(description='PIR 이벤트 시작', tags=['webcam'])
+def pir_event_start():
+	"""Start the PIR event detection."""
+	# setup_pir_event()  # Uncomment if you want to set up PIR event detection
+	return setup_pir_event()
+# @webcam_bp.route("/capture2")
+# @doc(description='스트리밍 중인 카메라2에서 캡처', tags=['webcam'])
+# def capture_from_stream2_route():
+#     return 
