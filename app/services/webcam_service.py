@@ -10,6 +10,8 @@ import cv2
 import torch
 from dotenv import load_dotenv
 from app.services.push_notification import control_siren
+from app.services.face_man import recognize_person_from_image, load_visitor_encodings
+from PIL import Image
 
 load_dotenv()
 
@@ -31,6 +33,12 @@ camera2_proc = None
 stream_lock1 = threading.Lock()
 stream_lock2 = threading.Lock()
 
+box_present = False      # 상자가 현재 있는지 여부
+matched_person_timestamp = 0
+PERSON_RECOGNITION_VALID_DURATION = 10
+last_face_check_time = 0
+FACE_CHECK_INTERVAL = 1.0
+
 # YOLO 모델 로드 (최상단에 위치)
 model = torch.hub.load(
     "/home/admin/workspace/Server/yolov5",
@@ -39,6 +47,15 @@ model = torch.hub.load(
     source="local"
 )
 model.to("cpu")
+
+# YOLO 모델 로드(사람)
+model2 = torch.hub.load(
+    "/home/admin/workspace/Server/yolov5",
+    "custom",
+    path="/home/admin/workspace/Server/pt_files/best_window.pt",
+    source="local"
+)
+model2.to("cpu")
 
 def capture_images():
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -137,37 +154,45 @@ def camera_thread_func():
 
 
 def model_thread_func():
-	global latest_frame, raw_frame_buffer
-	last_notified_time = 0  # 최근 알림 시각 (timestamp)
+    global latest_frame, raw_frame_buffer, matched_person_timestamp, box_present
+    last_notified_time = 0  # 최근 알림 시각 (timestamp)
 
-	while streaming_flag:
-		frame = None
-		with frame_lock:
-			if raw_frame_buffer is not None:
-				frame = raw_frame_buffer.copy()
-				raw_frame_buffer = None
+    while streaming_flag:
+        frame = None
+        with frame_lock:
+            if raw_frame_buffer is not None:
+                frame = raw_frame_buffer.copy()
+                raw_frame_buffer = None
 
-		if frame is not None:
-			results = model(frame)
-			annotated = results.render()[0]
+        if frame is not None:
+            results = model(frame)
+            annotated = results.render()[0]
 
-			current_time = time.time()
-			for *box, conf, cls in results.xyxy[0]:  # [x1, y1, x2, y2, conf, class_id]
-				if conf < 0.6 and (current_time - last_notified_time) >= 10:
-					label = results.names[int(cls)]
-					# send_push_notification(
-					# 	DEVICE_TOKEN, f"{label} 감지됨", f"신뢰도 {conf:.2f}"
-					# )
-					capture_from_stream1()
-					capture_from_stream2()
-					control_siren(True)  # 사이렌 작동
-					last_notified_time = current_time
-					break  # 하나만 감지되면 알림 보내고 종료
+            current_time = time.time()
+            detections = results.xyxy[0]
 
-			with frame_lock:
-				latest_frame = annotated.copy()
-		else:
-			time.sleep(0.01)
+            # ✅ NEW: 상자 감지 여부 확인
+            if any(conf >= 0.6 for *box, conf, cls in detections):
+                box_present = True
+            else:
+                if box_present:  # 이전에 상자가 있었는데 지금은 없음
+                    if (current_time - last_notified_time) >= 10:
+                        if current_time - matched_person_timestamp <= PERSON_RECOGNITION_VALID_DURATION:
+                            print("[INFO] Recently known person, box removed -> no siren.")
+                        else:
+                            print("[ALERT] Unknown or outdated person, box removed -> siren")
+                            control_siren(True)
+
+                        capture_from_stream1()
+                        capture_from_stream2()
+                        last_notified_time = current_time
+
+                    box_present = False
+
+            with frame_lock:
+                latest_frame = annotated.copy()
+        else:
+            time.sleep(0.01)
 
 
 def start_camera_stream():
@@ -253,22 +278,46 @@ def camera_thread_func2():
                     raw_frame_buffer2 = frame.copy()
     print("Camera 2 thread ended.")
 
+visitor_encodings = load_visitor_encodings()
+
 def model_thread_func2():
-    global latest_frame2, raw_frame_buffer2
+    global latest_frame2, raw_frame_buffer2, matched_person_timestamp, last_face_check_time
     while streaming_flag2:
         frame = None
         with frame_lock2:
             if raw_frame_buffer2 is not None:
                 frame = raw_frame_buffer2.copy()
                 raw_frame_buffer2 = None
+
         if frame is not None:
-            results = model(frame)
+            results = model2(frame)
             detections = results.xyxy[0].cpu().numpy()
-            for det in detections:
-                conf = det[4]
-                cls_id = int(det[5])
-                if conf < 0.3:
-                    print(f"[Camera 0] Low Confidence: class={cls_id}, conf={conf:.2f}")
+
+            if len(detections) > 0:
+                print(f"[DEBUG] {len(detections)} object(s) detected")
+
+                # ✅ 주기 제한 체크
+                current_time = time.time()
+                if current_time - last_face_check_time >= FACE_CHECK_INTERVAL:
+                    try:
+                        image_pil = Image.fromarray(frame).convert('RGB')
+                        rgb_frame = np.array(image_pil).copy()
+
+                        if rgb_frame.dtype != np.uint8:
+                            rgb_frame = rgb_frame.astype(np.uint8)
+
+                        matched_name = recognize_person_from_image(rgb_frame, visitor_encodings)
+
+                        if matched_name:
+                            matched_person_timestamp = time.time()
+                            print(f"[INFO] Visitor identified: {matched_name}")
+                        else:
+                            print("[INFO] Visitor not recognized")
+
+                    except Exception as e:
+                        print(f"[ERROR] Face recognition error: {e}")
+
+                    last_face_check_time = current_time  # ✅ 마지막 체크 시각 업데이트
 
             annotated = results.render()[0]
 
@@ -277,11 +326,12 @@ def model_thread_func2():
         else:
             time.sleep(0.01)
 
+
 def start_camera_stream2():
     global streaming_flag2
     streaming_flag2 = True
     threading.Thread(target=camera_thread_func2, daemon=True).start()
-    # threading.Thread(target=model_thread_func2, daemon=True).start()
+    threading.Thread(target=model_thread_func2, daemon=True).start()
 
 def stop_camera_stream2():
 	global camera2_proc, streaming_flag2
