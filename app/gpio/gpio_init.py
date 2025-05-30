@@ -51,7 +51,7 @@ def _siren_loop():
 
     while siren_active:
         # for freq in [440, 880]:
-        for freq in [100, 220]:
+        for freq in [220, 440]:
             if not siren_active:
                 break
             buzzer_pwm.ChangeFrequency(freq)

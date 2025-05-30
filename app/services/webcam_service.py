@@ -10,7 +10,7 @@ import cv2
 import torch
 from dotenv import load_dotenv
 from app.services.push_notification import control_siren
-
+from app.gpio.oled import display_safe_mode, clear_oled
 load_dotenv()
 
 CONFIDENCE_THRESHOLD = 0.8
@@ -403,10 +403,13 @@ def setup_pir_event():
 	global event_detected
 
 	if event_detected:
-		print("PIR 이벤트 제거")
 		GPIO.remove_event_detect(PIR_PIN)
+		clear_oled()
+		stop_all_camera_stream()
+		print("PIR 이벤트 제거")
 	else:
 		GPIO.add_event_detect(PIR_PIN, GPIO.RISING, callback=lambda pir: start_streams(), bouncetime=300)
+		display_safe_mode()
 		print("PIR 이벤트 감지 등록 완료")
 
 	event_detected = not event_detected
