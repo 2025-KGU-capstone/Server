@@ -64,7 +64,3 @@ def pir_event_start():
 	"""Start the PIR event detection."""
 	# setup_pir_event()  # Uncomment if you want to set up PIR event detection
 	return setup_pir_event()
-# @webcam_bp.route("/capture2")
-# @doc(description='스트리밍 중인 카메라2에서 캡처', tags=['webcam'])
-# def capture_from_stream2_route():
-#     return 
