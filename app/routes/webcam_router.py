@@ -1,7 +1,7 @@
 from flask import Blueprint, jsonify, Response, stream_with_context
 from app.services.webcam_service import capture_images, get_camera_stream, start_camera_stream, stop_camera_stream, video_feed, streaming_flag,\
 	start_camera_stream2, video_feed2, streaming_flag2, capture_from_stream2, capture_from_stream1,\
-	start_streams, setup_pir_event, stop_all_camera_stream
+	start_streams, setup_pir_event, stop_all_camera_stream, start_camera_stream2_only, start_camera_stream1_only
 from flask_apispec import doc
 
 
@@ -29,12 +29,14 @@ def stop():
 @webcam_bp.route("/video_feed1")
 @doc(description='카메라 0번 비디오 피드', tags=['webcam'])
 def video_feed_route():
+    start_camera_stream1_only()
     return video_feed()
 
 @webcam_bp.route("/video_feed2")
 @doc(description='카메라 1번 비디오 피드', tags=['webcam'])
 def video_feed_route2():
-    return video_feed2()
+	start_camera_stream2_only()
+	return video_feed2()
 
 @webcam_bp.route("/start_all_streams")
 @doc(description='두 개의 카메라 스트림 동시에 시작', tags=['webcam'])

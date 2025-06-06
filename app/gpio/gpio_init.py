@@ -62,6 +62,31 @@ def _siren_loop():
     buzzer_pwm_started = False
     GPIO.output(LED_PIN, GPIO.LOW)
 
+def play_verified_sound():
+    global buzzer_pwm, buzzer_pwm_started, LED_PIN
+
+    if not buzzer_pwm_started:
+        buzzer_pwm.start(50)
+        buzzer_pwm_started = True
+
+    # "띵" x2 - 같은 음 두 번
+    for _ in range(2):
+        buzzer_pwm.ChangeFrequency(523)  # C5
+        GPIO.output(LED_PIN, GPIO.HIGH)
+        time.sleep(0.15)
+        GPIO.output(LED_PIN, GPIO.LOW)
+        time.sleep(0.05)
+
+    # "동" - 높음
+    buzzer_pwm.ChangeFrequency(659)  # E5
+    GPIO.output(LED_PIN, GPIO.HIGH)
+    time.sleep(0.2)
+    GPIO.output(LED_PIN, GPIO.LOW)
+
+    buzzer_pwm.stop()
+    buzzer_pwm_started = False
+
+
 def start_siren():
     global siren_active, siren_thread
     if not siren_active:
