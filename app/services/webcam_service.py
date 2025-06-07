@@ -11,6 +11,7 @@ import torch
 from dotenv import load_dotenv
 from app.services.push_notification import control_siren
 from app.services.face_man import recognize_person_from_image, load_visitor_encodings
+from app.gpio.gpio_init import play_verified_sound
 from PIL import Image
 
 from app.gpio.oled import display_safe_mode, clear_oled
@@ -21,6 +22,7 @@ DEVICE_TOKEN = os.getenv("DEVICE_TOKEN")
 
 # 전역 변수 선언
 streaming_flag = False  # 스트리밍 상태 확인용
+event_detected = False
 
 STREAM_CAMERA_INDEX = 0
 CAP_CAMERA_INDEX = 1
@@ -128,7 +130,8 @@ def get_camera_stream():
     import subprocess
     return subprocess.Popen(
         ["libcamera-vid", "-t", "0", "-o", "-", "--codec", "mjpeg", "--width", "640", "--height", "860"],
-        stdout=subprocess.PIPE
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL  # ✅ stderr 무시
     )
 
 def camera_thread_func():
@@ -158,6 +161,7 @@ def model_thread_func():
     global latest_frame, raw_frame_buffer, matched_person_timestamp, box_present
     last_notified_time = 0  # 최근 알림 시각 (timestamp)
 
+    # sleep(5)  # 초기 프레임을 기다리기 위해 잠시 대기
     while streaming_flag:
         frame = None
         with frame_lock:
@@ -178,15 +182,10 @@ def model_thread_func():
             else:
                 if box_present:  # 이전에 상자가 있었는데 지금은 없음
                     if (current_time - last_notified_time) >= 10:
-                        if current_time - matched_person_timestamp <= PERSON_RECOGNITION_VALID_DURATION:
-                            print("[INFO] Recently known person, box removed -> no siren.")
-                        else:
-                            print("[ALERT] Unknown or outdated person, box removed -> siren")
-                            control_siren(True)
-
                         capture_from_stream1()
                         capture_from_stream2()
                         last_notified_time = current_time
+                        control_siren(True)
 
                     box_present = False
 
@@ -195,6 +194,10 @@ def model_thread_func():
         else:
             time.sleep(0.01)
 
+def start_camera_stream1_only():
+	global streaming_flag, streaming_flag2
+	streaming_flag = True
+	threading.Thread(target=camera_thread_func, daemon=True).start()	
 
 def start_camera_stream():
     global streaming_flag, streaming_flag2
@@ -209,6 +212,7 @@ def start_camera_stream():
 
 def video_feed():
     global streaming_flag
+    print("video_feed called")
 
     with stream_lock1:
         if not streaming_flag:
@@ -254,7 +258,8 @@ def get_camera_stream2():
          "-o", "-",
          "--codec", "mjpeg",
          "--width", "640", "--height", "860"],
-        stdout=subprocess.PIPE
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL  # ✅ stderr 무시
     )
 
 def camera_thread_func2():
@@ -312,6 +317,7 @@ def model_thread_func2():
                         if matched_name:
                             matched_person_timestamp = time.time()
                             print(f"[INFO] Visitor identified: {matched_name}")
+                            setup_pir_event()
                         else:
                             print("[INFO] Visitor not recognized")
 
@@ -327,6 +333,11 @@ def model_thread_func2():
         else:
             time.sleep(0.01)
 
+def start_camera_stream2_only():
+	global streaming_flag2
+	streaming_flag2 = True
+	threading.Thread(target=camera_thread_func2, daemon=True).start()
+	# threading.Thread(target=model_thread_func2, daemon=True).start()
 
 def start_camera_stream2():
     global streaming_flag2
@@ -349,6 +360,7 @@ def stop_camera_stream2():
 
 def video_feed2():
     global streaming_flag2
+    print("video_feed2 called")
 
     with stream_lock2:
         if not streaming_flag2:
@@ -436,17 +448,30 @@ def capture_from_stream2():
 
 
 def start_streams():
-	video_feed()
-	video_feed2()
-	return jsonify({
-		"status": "started",
-		"streams": {
-			"video_feed": streaming_flag,
-			"video_feed2": streaming_flag2
-		}
-	})
+    global streaming_flag, streaming_flag2
 
-event_detected = False
+    if not streaming_flag:
+        start_camera_stream()
+
+    if not streaming_flag2:
+        start_camera_stream2()
+
+    print("Both camera streams started.")
+
+    # ✅ 10초 후 자동 종료되는 타이머 쓰레드
+    def stop_after_delay():
+        time.sleep(10)
+        stop_all_camera_stream()
+        print("[INFO] Both camera streams stopped after 10 seconds.")
+
+    threading.Thread(target=stop_after_delay, daemon=True).start()
+
+    return {
+        "status": "success",
+        "streaming_flag1": streaming_flag,
+        "streaming_flag2": streaming_flag2
+    }
+
 
 def setup_pir_event():
 	import RPi.GPIO as GPIO
@@ -457,6 +482,7 @@ def setup_pir_event():
 		GPIO.remove_event_detect(PIR_PIN)
 		clear_oled()
 		stop_all_camera_stream()
+		play_verified_sound()
 		print("PIR 이벤트 제거")
 	else:
 		GPIO.add_event_detect(PIR_PIN, GPIO.RISING, callback=lambda pir: start_streams(), bouncetime=300)
